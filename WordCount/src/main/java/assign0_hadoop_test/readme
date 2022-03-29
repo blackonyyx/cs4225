@@ -1,0 +1,10 @@
+############### Assignment 0: Hadoop Test #####################
+
+Use scripts to compile your codes
+$ ./compile_run		# compile and run your code on sample dataset, check the result
+These scripts will also be used on marking. So ensure your output format is the same as 'answer.txt'
+
+In this assignment, you should ONLY modify:
+-- assign0_hadoop_test.WordCount.java
+
+Do NOT add new files.

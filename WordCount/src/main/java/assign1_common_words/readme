@@ -1,0 +1,15 @@
+############### Assignment 1-1: Top K Common Words #####################
+
+Command Format: TopkCommonWords <input_file1> <input_file2> <stopwords> <output_dir>
+Example: hadoop jar cm.jar TopkCommonWords commonwords/input/task1-input1.txt commonwords/input/task1-input2.txt commonwords/input/stopwords.txt commonwords/cm_output/
+(All the file path in the command is HDFS path)
+The output should be stored in a text file commonwords/cm_output/part-r-00000 by default.
+
+Use scripts to compile your codes
+$ ./compile_run <matric_number>		# compile and run your code on sample dataset, check the result
+These scripts will also be used on marking. So ensure your output format is the same as 'answer1.txt' or 'answer2.txt'
+
+In this assignment, you should ONLY modify:
+-- TopkCommonWords.java
+
+Do NOT add new files. Do NOT define Java packages. The script will compile 'TopkCommonWords.java' as simple java file.

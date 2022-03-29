@@ -1,0 +1,46 @@
+#!/usr/bin/bash
+
+THIS_DIR=$(cd "$(realpath "$(dirname "${BASH_SOURCE[0]}")")" && pwd)
+
+source "$THIS_DIR"/env.sh
+if [ ! "$1" ]; 
+then
+    echo "No matriculation number!"
+else
+    id=$1
+    echo "Matriculation number is '$id' "
+    last_character=${id: -1}
+    
+    if [[ "$last_character" =~ [A-Z] ]]; 
+    then
+        echo "Start compiling"
+        hadoop com.sun.tools.javac.Main TopkCommonWords.java
+        jar cf cm.jar TopkCommonWords*.class
+        echo "Uploading input files"
+        hdfs dfs -rm -r -f commonwords/input
+        hdfs dfs -mkdir -p commonwords/input
+        hdfs dfs -put data/* commonwords/input
+        echo "Clear previous output folder"
+        hdfs dfs -rm -r -f commonwords/wc_output commonwords/cm_output echo "Submit job"
+        hadoop jar cm.jar TopkCommonWords commonwords/input/task1-input1.txt commonwords/input/task1-input2.txt commonwords/input/stopwords.txt commonwords/cm_output/
+        echo "Job finished. Print Top 20 words."
+        hdfs dfs -cat commonwords/cm_output/part-r-00000
+        #if [[ "$(hdfs dfs -cat commonwords/cm_output/part-r-00000)" == "$(cat answer.txt)" ]]
+        #then
+        #  echo "Test passed."
+        #else
+        #  echo "Wrong answer."
+        #fi
+        hdfs dfs -get commonwords/cm_output/part-r-00000 . && mv part-r-00000 output.txt
+        hdfs dfs -get commonwords/cm_output/part-r-00000 . && mv part-r-00000 output.txt
+
+        if [[ "$last_character" =~ [A-M] ]]; then
+            python3 check_common.py answer1.txt output.txt
+        else
+            python3 check_common.py answer2.txt output.txt
+        fi
+    else
+        echo "Last character of the matric number is not uppercase alphabet"
+        exit 0
+    fi
+fi

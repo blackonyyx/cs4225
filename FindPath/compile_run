@@ -1,0 +1,25 @@
+#!/usr/bin/bash
+
+THIS_DIR=$(cd "$(realpath "$(dirname "${BASH_SOURCE[0]}")")" && pwd)
+source "$THIS_DIR"/env.sh
+
+echo "Compiling..."
+mvn package 
+
+echo "Uploading input files"
+hdfs dfs -rm -r -f input
+hdfs dfs -mkdir -p input
+hdfs dfs -put data/* input 
+echo "Clear previous output"
+hdfs dfs -rm -r -f output
+rm result.txt result.adjmap.txt
+
+echo "Submitting job..."
+spark-submit --deploy-mode client --class FindPath target/FindPath-jar-with-dependencies.jar input/NUS.osm input/input.txt output/result.adjmap.txt output/result.txt
+
+echo "Job finished."
+hdfs dfs -get output/result.adjmap.txt . 
+hdfs dfs -get output/result.txt . 
+
+./binaries/osmutils_linux3.10 validate-map data/NUS.osm result.adjmap.txt
+./binaries/osmutils_linux3.10 validate data/NUS.osm result.txt

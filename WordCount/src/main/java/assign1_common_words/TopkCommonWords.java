@@ -3,8 +3,9 @@ package assign1_common_words;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.*;
-import org.apache.hadoop.mapred.lib.ChainMapper;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
@@ -13,14 +14,12 @@ import org.apache.hadoop.mapreduce.lib.input.MultipleInputs;
 import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
-import org.apache.hadoop.shaded.org.apache.commons.collections.FastHashMap;
-import org.apache.hadoop.shaded.org.jline.utils.InputStreamReader;
 
 import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
-import java.util.regex.Pattern;
 
 public class TopkCommonWords{
   public static class TokenizerMapper1 extends Mapper<Object, Text, Text, IntWritable> {
@@ -174,7 +173,7 @@ public class TopkCommonWords{
         }
         LongWritable value = listOfValues.stream().max(LongWritable::compareTo).get();
 //        System.out.println(listOfValues);
-        // put the new tuple into the priority queue
+        // put the new tuple into the queue
         set.add(new Tuple(key.toString(), value.get()));
         if (set.size() > 20) {
           // pop the smallest conforming value
@@ -234,3 +233,5 @@ public class TopkCommonWords{
     System.exit(job2.waitForCompletion(true) ? 0 : 1);
   }
 }
+
+

@@ -2,14 +2,12 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.shaded.org.eclipse.jetty.websocket.common.frames.DataFrame;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.*;
 
-import org.apache.spark.sql.expressions.UserDefinedFunction;
 import org.apache.spark.sql.types.*;
 import org.graphframes.GraphFrame;
 import org.graphframes.lib.AggregateMessages;
@@ -36,26 +34,18 @@ public class FindPath {
         distance = Math.pow(distance, 2) + Math.pow(height, 2);
         return Math.sqrt(distance);
     }
-    static boolean runOnCluster = false;
+    static boolean runOnCluster = true;
     //https://stackoverflow.com/questions/50871891/how-to-parse-xml-using-databricks-in-spark-java
 
     public static void main(String[] args) {
 
-        SparkConf sparkConf = new SparkConf().setAppName("FindPath");
-        int slices = 0;
-        JavaSparkContext jsc = null;
-        if (!runOnCluster) {
-            sparkConf.setMaster("local[2]");
-            sparkConf.setJars(new String[] { "target/eduonix_spark-deploy.jar" });
-            slices = 10;
-            jsc = new JavaSparkContext(sparkConf); }
-        else {
-            slices = (args.length == 1) ? Integer.parseInt(args[0]) : 2;
-            jsc = new JavaSparkContext(sparkConf);
-        }
-        SparkSession spark = SparkSession.builder().config(jsc.getConf()).getOrCreate();
-        spark.sparkContext().setCheckpointDir("/tmp/checkpoints");
-        spark.sparkContext().setLogLevel("WARN");
+      SparkSession spark = SparkSession
+    .builder()
+    .appName("FindPath")
+    .master("local[*]")
+    .config("spark.executor.cores", 10)
+    .config("spark.executor.instances", 16)
+    .getOrCreate();
         spark.udf().register("mapdistance", (Double lat1, Double lat2, Double lon1, Double lon2) ->{
             final int R = 6371; // Radius of the earth
             double latDistance = Math.toRadians(lat2 - lat1);
@@ -72,12 +62,12 @@ public class FindPath {
 
         spark.udf().register("addpath", (String s, Long id) -> s.length() == 0 ? id.toString() : s + " -> " + id, DataTypes.StringType);
 
-        String input1 = "data/NUS.osm";
+        String input1 = args[0];
 //        spark.sqlContext().udf().register( "2wayArrayJoiner", )
         //args[0];
-        String input2 = "data/input.txt";//args[1];
-        String output1 = "output/result.adjmap.txt";//args[2];
-        String output2 = "output/result.txt";//args[3];
+        String input2 = args[1];
+        String output1 = args[2];
+        String output2 = args[3];
 //        FileSystem.
         StructType nodeSchema = new StructType(new StructField[] {
             new StructField("_id", DataTypes.LongType, false, Metadata.empty()),
@@ -136,7 +126,7 @@ public class FindPath {
         Dataset<Row> onlyNode = rawEdgeList.join(nodes, col("id").equalTo(rawEdgeList.col("src")).or(col("id").equalTo(rawEdgeList.col("dst"))), "left").select("id").distinct().withColumnRenamed("id", "n");
         // get all nodes
         Dataset<Row>  gnodes = onlyNode.join(nodes, col("n").equalTo(nodes.col("id")), "inner").drop("n");
-        iterateEdges(rawEdgeList, output1, jsc);
+        iterateEdges(rawEdgeList, output1, spark.sparkContext().hadoopConfiguration());
 
         //  spark.sqlContext().dropTempTable("edgesTable");
         // src, dest
@@ -146,9 +136,9 @@ public class FindPath {
         Dataset<Row> edge = rawEdgeList.join(gnodes.as("srcN"), rawEdgeList.col("src").equalTo(col("srcN.id")), "inner")
                                        .join(gnodes.as("destN"), rawEdgeList.col("dst").equalTo(col("destN.id")), "inner")
                 .withColumn("cost", callUDF("mapdistance", col("srcN.lat"),  col("destN.lat"), col("srcN.lon"), col("destN.lon")))
-                .select(col("src"), col("dst"), col("cost")).checkpoint();
+                .select(col("src"), col("dst"), col("cost")).cache();
         GraphFrame graph = GraphFrame.apply(gnodes, edge);
-        shortestPathRunner(graph, input2, output2, jsc);
+        shortestPathRunner(graph, input2, output2, spark.sparkContext().hadoopConfiguration());
     }
 
 
@@ -188,7 +178,7 @@ public class FindPath {
 
             Dataset<Row> newDist = dijkstra.aggregateMessages()
                     .sendToDst(msgForDest)
-                    .agg(min(AggregateMessages.msg()).alias("aggMess"));
+                    .agg(min(AggregateMessages.msg()).alias("aggMess")).cache();
 //            newDist.printSchema();
 //            newDist.filter(col("aggMess").isNotNull()).show(10);
             Column newVisitedCol = when(
@@ -210,17 +200,16 @@ public class FindPath {
                     .withColumnRenamed("newtcost", "tcost")
                     .withColumnRenamed("newpath", "path")
                     .withColumnRenamed("newVisited", "visited");
+	    newDist.unpersist();
 //            newVertices.printSchema();
 //            newVertices.sort("tcost").show(10);
             Dataset<Row> cachedNewVert;
-            if (i % 20 == 0) {
-                cachedNewVert = AggregateMessages.getCachedDataFrame(newVertices).localCheckpoint();
-            } else if (i % 501 == 0) {
-                cachedNewVert = AggregateMessages.getCachedDataFrame(newVertices).checkpoint();
+	    if (i % 5 == 4) {
+		cachedNewVert = AggregateMessages.getCachedDataFrame(newVertices).localCheckpoint();
             } else {
-                cachedNewVert = AggregateMessages.getCachedDataFrame(newVertices);
-            }
-            dijkstra = GraphFrame.apply(cachedNewVert, dijkstra.edges());
+		cachedNewVert = AggregateMessages.getCachedDataFrame(newVertices);
+	    }
+	    dijkstra = GraphFrame.apply(cachedNewVert, dijkstra.edges());
             i++;
             if (dijkstra.vertices().filter(dijkstra.vertices().col("id").equalTo(dest)).first().getBoolean(3)) {
                 return dijkstra.vertices().filter(dijkstra.vertices().col("id").equalTo(dest))
@@ -246,12 +235,12 @@ public class FindPath {
         }
     }
 
-    static void shortestPathRunner(GraphFrame graphFrame, String input, String output, JavaSparkContext jsc) {
+    static void shortestPathRunner(GraphFrame graphFrame, String input, String output, Configuration jsc) {
         Path p = new Path(input);
         Path pout = new Path(output);
 
         try {
-            FileSystem fs = FileSystem.get(p.toUri(), jsc.hadoopConfiguration());
+            FileSystem fs = FileSystem.get(p.toUri(), jsc);
             Scanner sc = new Scanner(fs.open(p));
             List<Long> src = new ArrayList<>();
             List<Long> dest = new ArrayList<>();
@@ -263,14 +252,16 @@ public class FindPath {
                 dest.add(sc.nextLong());
             }
             sc.close();
+            fs.mkdirs(pout.getParent());
+	    long startTime, endTime;
             FSDataOutputStream stream = fs.create(pout);
-            long startTime, endTime;
-
+	    StringBuilder sb = new StringBuilder();
             for (int i = 0; i < src.size(); i++) {
-                startTime = System.currentTimeMillis();
+		startTime = System.currentTimeMillis();
                 String r = shortestPath(graphFrame, src.get(i), dest.get(i)) + "\n";
+		sb.append(r).append(System.lineSeparator());
                 stream.write(r.getBytes());
-                endTime = System.currentTimeMillis();
+		endTime = System.currentTimeMillis();
                 System.out.println("Time for iteration " + (endTime-startTime)/ 1000);
             }
             stream.close();
@@ -279,7 +270,7 @@ public class FindPath {
             e.printStackTrace();
         }
     }
-    static void iterateEdges(Dataset<Row> edges, String output, JavaSparkContext jsc) {
+    static void iterateEdges(Dataset<Row> edges, String output, Configuration jsc) {
         Iterator<Row> w = edges.groupBy(col("src")).agg(collect_list("dst").as("adjacency")).orderBy("src").toLocalIterator();
         StringBuilder adjList = new StringBuilder();
         while (w.hasNext()) {
@@ -299,6 +290,6 @@ public class FindPath {
                 }
             }
         }
-        writeOutput(adjList.toString(), output, jsc.hadoopConfiguration());
+        writeOutput(adjList.toString(), output, jsc);
     }
 }
